@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\DB;
 use App\Order;
 use App\OrderField;
 use App\OrderFieldValue;
+use Datetime;
+use Redis;
 
 class TableController extends Controller
 {
@@ -18,6 +20,7 @@ class TableController extends Controller
     public function new() {
       $order = new Order;
       $order->name = $this->generateRandomString();
+
       $order->creator_id = 1;
       $order->save();
 
@@ -29,38 +32,61 @@ class TableController extends Controller
         $orderFieldValue->value = $this->generateRandomString();
         $orderFieldValue->save();
       }
-      return response()->json($this->getOrders());
+
+      return response()->json($this->getOrders(false));
     }
 
     public function orders() {
-      return response()->json($this->getOrders());
+      return response()->json($this->getOrders(false));
     }
 
-    public function getOrders() {
+    public function getOrders($isAfterReset) {
+      $now = (new DateTime())->getTimestamp();
+
+      $redis = new Redis;
+      $redis->connect('127.0.0.1', 6379);
+
       $response = [];
-      $orders = Order::all();
-      foreach ($orders as $order) {
-        $item = [
-          ['ID', $order->id],
-          ['C reator ID', $order->creator_id],
-          ['Name', $order->name]
-        ];
+      if (!$isAfterReset  || (!$redis->exists('ts')) ||
+          (!$redis->exists('orders')) ||
+          ($now - unserialize($redis->get('ts')) >= 5 * 60))
+      {
+        $orders = Order::all();
+        foreach ($orders as $order) {
+          $item = [
+            ['ID', $order->id],
+            ['C reator ID', $order->creator_id],
+            ['Name', $order->name]
+          ];
 
-        foreach (OrderField::all() as $field) {
-          $value = OrderFieldValue
-            ::where('order_id', $order->id)
-            ->where('field_id', $field->id)->first()->value;
-          $item[] = [$field->name, $value];
+          foreach (OrderField::all() as $field) {
+            $value = OrderFieldValue
+              ::where('order_id', $order->id)
+              ->where('field_id', $field->id)->first()->value;
+            $item[] = [$field->name, $value];
+          }
+
+          $response[] = $item;
         }
-
-        $response[] = $item;
+        $redis->set('orders', serialize($response));
+      } else {
+        $response = unserialize($redis->get('orders'));
       }
+
+      $redis->set('ts', serialize((new DateTime())->getTimestamp()));
+      $redis->close();
       return $response;
     }
 
     public function reset() {
+        $redis = new Redis;
+        $redis->connect('127.0.0.1', 6379);
+        $redis->del('ts');
+        $redis->del('orders');
+        $redis->close();
+
         Order::query()->delete();
-        return response()->json($this->getOrders());
+        return response()->json($this->getOrders(true));
     }
 
     private function generateRandomString($length = 10) {
