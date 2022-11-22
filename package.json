@@ -11,6 +11,6 @@
     },
     "devDependencies": {
         "cross-env": "^7.0",
-        "resolve-url-loader": "^3.1.0"
+        "resolve-url-loader": "^5.0.0"
     }
 }
